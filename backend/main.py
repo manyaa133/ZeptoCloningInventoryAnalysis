@@ -9,34 +9,53 @@ from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 
+from mangum import Mangum  # ✅ REQUIRED FOR VERCEL
+
 from . import models, schemas, seed_data
 from .database import engine, Base, get_db, SessionLocal
 
 
 # ---------------- LOGGING ----------------
 logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger("zepto-backend")
+logger = logging.getLogger("zepto-api")
 
 
-# ---------------- APP ----------------
-app = FastAPI(title="Zepto Inventory API", version="1.0.0")
+# ---------------- FASTAPI APP ----------------
+app = FastAPI(title="Zepto Inventory API (Vercel)", version="1.0.0")
 
 
-# ---------------- CORS ----------------
+# ---------------- CORS (IMPORTANT FOR FRONTEND) ----------------
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=["*"],  # change to your Vercel frontend domain in production
     allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
 
-# ---------------- MIDDLEWARE ----------------
-@app.middleware("http")
-async def log_requests(request: Request, call_next):
-    logger.info(f"{request.method} {request.url.path}")
-    return await call_next(request)
+# ---------------- HEALTH CHECK (VERY IMPORTANT FOR VERCEL) ----------------
+@app.get("/")
+def root():
+    return {"status": "ok", "message": "Zepto API running on Vercel"}
+
+
+# ---------------- DB INIT (SAFE FOR SERVERLESS) ----------------
+def init_db():
+    Base.metadata.create_all(bind=engine)
+
+
+# run once per cold start
+init_db()
+
+
+# ---------------- DB SESSION DEPENDENCY ----------------
+def get_db_session():
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
 
 
 # ---------------- HELPERS ----------------
@@ -46,7 +65,8 @@ def build_stats(db: Session):
         total_quantity=db.query(func.sum(models.Inventory.quantity)).scalar() or 0,
         inventory_value=db.query(
             func.sum(models.Inventory.quantity * models.Inventory.price)
-        ).scalar() or 0,
+        ).scalar()
+        or 0.0,
         low_stock_count=db.query(models.Inventory)
         .filter(models.Inventory.quantity > 0)
         .filter(models.Inventory.quantity <= models.Inventory.reorder_level)
@@ -64,16 +84,16 @@ def build_stats(db: Session):
 def get_inventory(
     search: Optional[str] = None,
     category: Optional[str] = None,
-    db: Session = Depends(get_db),
+    db: Session = Depends(get_db_session),
 ):
     query = db.query(models.Inventory)
 
     if search:
         s = f"%{search}%"
         query = query.filter(
-            models.Inventory.sku.ilike(s) |
-            models.Inventory.name.ilike(s) |
-            models.Inventory.category.ilike(s)
+            models.Inventory.sku.ilike(s)
+            | models.Inventory.name.ilike(s)
+            | models.Inventory.category.ilike(s)
         )
 
     if category and category.lower() != "all":
@@ -83,9 +103,9 @@ def get_inventory(
 
 
 @app.post("/inventory", response_model=schemas.InventoryItem)
-def create_inventory(
+def create_item(
     item: schemas.InventoryCreate,
-    db: Session = Depends(get_db),
+    db: Session = Depends(get_db_session),
 ):
     existing = db.query(models.Inventory).filter(
         models.Inventory.sku == item.sku
@@ -102,10 +122,10 @@ def create_inventory(
 
 
 @app.put("/inventory/{item_id}", response_model=schemas.InventoryItem)
-def update_inventory(
+def update_item(
     item_id: int,
     patch: schemas.InventoryUpdate,
-    db: Session = Depends(get_db),
+    db: Session = Depends(get_db_session),
 ):
     db_item = db.query(models.Inventory).filter(
         models.Inventory.id == item_id
@@ -123,12 +143,12 @@ def update_inventory(
 
 
 @app.get("/inventory/stats", response_model=schemas.InventoryStats)
-def stats(db: Session = Depends(get_db)):
+def stats(db: Session = Depends(get_db_session)):
     return build_stats(db)
 
 
-@app.get("/inventory/categories", response_model=List[schemas.CategoryDistribution])
-def categories(db: Session = Depends(get_db)):
+@app.get("/inventory/categories", response_model=list[schemas.CategoryDistribution])
+def categories(db: Session = Depends(get_db_session)):
     rows = db.query(
         models.Inventory.category,
         func.count(models.Inventory.id),
@@ -149,19 +169,12 @@ def categories(db: Session = Depends(get_db)):
 
 
 @app.get("/inventory/low-stock", response_model=List[schemas.InventoryItem])
-def low_stock(db: Session = Depends(get_db)):
+def low_stock(db: Session = Depends(get_db_session)):
     return db.query(models.Inventory).filter(
         models.Inventory.quantity > 0,
         models.Inventory.quantity <= models.Inventory.reorder_level
     ).all()
 
 
-# ---------------- STARTUP ----------------
-@app.on_event("startup")
-def startup():
-    Base.metadata.create_all(bind=engine)
-    db = SessionLocal()
-    try:
-        seed_data.seed_db(db)
-    finally:
-        db.close()
+# ---------------- VERCEL HANDLER (CRITICAL) ----------------
+handler = Mangum(app)
