@@ -1,5 +1,7 @@
+import { useState } from 'react'
 import './App.css'
 import AnalyticsCards from './components/AnalyticsCards'
+import AddProductForm from './components/AddProductForm'
 import ChartPanel from './components/ChartPanel'
 import InventoryTable from './components/InventoryTable'
 import LoadingSkeleton from './components/LoadingSkeleton'
@@ -7,11 +9,15 @@ import SearchBar from './components/SearchBar'
 import useInventory from './hooks/useInventory'
 
 function App() {
+  const [showAddForm, setShowAddForm] = useState(false)
+
   const {
     categories,
     filteredItems,
     loading,
+    submitting,
     error,
+    submitError,
     search,
     selectedCategory,
     stats,
@@ -19,6 +25,7 @@ function App() {
     valueByCategory,
     setSearch,
     setSelectedCategory,
+    createProduct,
   } = useInventory()
 
   return (
@@ -34,13 +41,28 @@ function App() {
       </header>
 
       <section className="top-row">
-        <SearchBar
-          search={search}
-          category={selectedCategory}
-          categories={categories}
-          onSearch={setSearch}
-          onCategoryChange={setSelectedCategory}
-        />
+        <div className="search-actions-row">
+          <SearchBar
+            search={search}
+            category={selectedCategory}
+            categories={categories}
+            onSearch={setSearch}
+            onCategoryChange={setSelectedCategory}
+          />
+          <div className="add-product-action">
+            <button type="button" onClick={() => setShowAddForm((current) => !current)}>
+              {showAddForm ? 'Hide add product' : 'Add product'}
+            </button>
+          </div>
+        </div>
+        {showAddForm && (
+          <AddProductForm
+            categories={categories.filter((category) => category !== 'All')}
+            onCreate={createProduct}
+            loading={submitting}
+            error={submitError}
+          />
+        )}
       </section>
 
       {loading ? (

@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import {
+    createInventoryItem,
     getCategoryDistribution,
     getInventory,
     getInventoryStats,
@@ -14,31 +15,33 @@ export default function useInventory() {
     const [selectedCategory, setSelectedCategory] = useState(DEFAULT_CATEGORY)
     const [search, setSearch] = useState('')
     const [loading, setLoading] = useState(true)
+    const [submitting, setSubmitting] = useState(false)
     const [error, setError] = useState(null)
+    const [submitError, setSubmitError] = useState(null)
+
+    async function loadData() {
+        setLoading(true)
+        setError(null)
+
+        try {
+            const [inventoryData, statsData, distributionData] = await Promise.all([
+                getInventory(),
+                getInventoryStats(),
+                getCategoryDistribution(),
+            ])
+
+            setItems(inventoryData)
+            setStats(statsData)
+            setCategoryDistribution(distributionData)
+        } catch (err) {
+            console.error('Failed to fetch inventory data', err)
+            setError(err?.message || 'Unable to load inventory data')
+        } finally {
+            setLoading(false)
+        }
+    }
 
     useEffect(() => {
-        async function loadData() {
-            setLoading(true)
-            setError(null)
-
-            try {
-                const [inventoryData, statsData, distributionData] = await Promise.all([
-                    getInventory(),
-                    getInventoryStats(),
-                    getCategoryDistribution(),
-                ])
-
-                setItems(inventoryData)
-                setStats(statsData)
-                setCategoryDistribution(distributionData)
-            } catch (err) {
-                console.error('Failed to fetch inventory data', err)
-                setError(err?.message || 'Unable to load inventory data')
-            } finally {
-                setLoading(false)
-            }
-        }
-
         loadData()
     }, [])
 
@@ -77,11 +80,30 @@ export default function useInventory() {
         }))
     }, [items])
 
+    async function createProduct(product) {
+        setSubmitting(true)
+        setSubmitError(null)
+
+        try {
+            await createInventoryItem(product)
+            await loadData()
+        } catch (err) {
+            console.error('Failed to create inventory item', err)
+            const message = err?.message || 'Unable to add product'
+            setSubmitError(message)
+            throw new Error(message)
+        } finally {
+            setSubmitting(false)
+        }
+    }
+
     return {
         categories,
         filteredItems,
         loading,
+        submitting,
         error,
+        submitError,
         search,
         selectedCategory,
         stats,
@@ -89,5 +111,6 @@ export default function useInventory() {
         valueByCategory,
         setSearch,
         setSelectedCategory,
+        createProduct,
     }
 }

@@ -65,3 +65,7 @@ export function getCategoryDistribution() {
 export function getLowStockItems() {
     return api.get('/inventory/low-stock').then((response) => response.data)
 }
+
+export function createInventoryItem(item) {
+    return api.post('/inventory', item).then((response) => response.data)
+}
